@@ -1,0 +1,212 @@
+import numpy as np
+import random
+
+import tensorflow as tf
+from keras.backend.tensorflow_backend import set_session
+config = tf.ConfigProto()
+config.gpu_options.per_process_gpu_memory_fraction = 1
+set_session(tf.Session(config=config))
+
+
+width, height, n_len, n_class = 380, 20, 20, 1993
+
+from keras import backend as K
+import keras
+def ctc_lambda_func(args):
+    y_pred, labels, input_length, label_length = args
+    y_pred = y_pred[:, 2:, :]
+    return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+    
+from keras.models import *
+from keras.layers import *
+rnn_size = 128
+
+input_tensor = Input((width, height, 1))
+x = input_tensor
+'''
+for i in range(3):
+    x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+    x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+    x = BatchNormalization()(x)
+    x = MaxPooling2D(pool_size=(2, 2))(x)
+conv_shape = x.get_shape()
+x = Reshape(target_shape=(int(conv_shape[1]), int(conv_shape[2]*conv_shape[3])))(x)
+
+
+x = Dense(128, activation='relu')(x)
+'''
+
+'''
+x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+x = BatchNormalization()(x)
+x = MaxPooling2D(pool_size=(2, 2))(x)
+
+x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+x = BatchNormalization()(x)
+x = MaxPooling2D(pool_size=(2, 2))(x)
+
+x = Convolution2D(64, (3, 3), activation='relu', padding = 'same')(x)
+x = Convolution2D(64, (3, 3), activation='relu', padding = 'same')(x)
+x = BatchNormalization()(x)
+x = MaxPooling2D(pool_size=(2, 2))(x)
+'''
+
+x = Convolution2D(8, (3, 3), activation='relu', padding = 'same')(x)
+x = Convolution2D(8, (3, 3), activation='relu', padding = 'same')(x)
+x = BatchNormalization()(x)
+x = Convolution2D(16, (3, 3), activation='relu', padding = 'same')(x)
+x = Convolution2D(16, (3, 3), activation='relu', padding = 'same')(x)
+x = BatchNormalization()(x)
+x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+x = Convolution2D(32, (3, 3), activation='relu', padding = 'same')(x)
+x = BatchNormalization()(x)
+x = MaxPooling2D(pool_size=(2, 2))(x)
+
+conv_shape = x.get_shape()
+x = Reshape(target_shape=(int(conv_shape[1]), int(conv_shape[2]*conv_shape[3])))(x)
+
+
+x = Dense(128, activation='relu')(x)
+
+gru_1 = GRU(rnn_size, return_sequences=True, init='he_normal', name='gru1')(x)
+gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, init='he_normal', name='gru1_b')(x)
+gru1_merged = Add()([gru_1, gru_1b])
+
+gru_2 = GRU(rnn_size, return_sequences=True, init='he_normal', name='gru2')(gru1_merged)
+gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, init='he_normal', name='gru2_b')(gru1_merged)
+x = Concatenate()([gru_2, gru_2b])
+
+x = Dropout(0.25)(x)
+x = Dense(n_class, init='he_normal', activation='softmax')(x)
+base_model = Model(input=input_tensor, output=x)
+
+labels = Input(name='the_labels', shape=[None], dtype='float32')
+input_length = Input(name='input_length', shape=[1], dtype='int64')
+label_length = Input(name='label_length', shape=[1], dtype='int64')
+loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([x, labels, input_length, label_length])
+
+model = Model(input=[input_tensor, labels, input_length, label_length], output=[loss_out])
+model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer='adadelta')
+
+model.summary()
+
+import numpy as np
+from random import randint
+import random
+import os
+from PIL import Image,ImageDraw,ImageFont
+import cv2
+import matplotlib.pyplot as plt
+
+path = '/home/wzp/table/chinese'
+def get_label_dict(path):
+    characters = []
+    fo = open(path + '/label2', encoding = 'gbk')
+    for lines in fo.readlines():
+        for line in lines.strip('\n'):
+            characters.append(line.strip('\n'))
+    return characters
+words = get_label_dict(path)
+numbers = words[:17]
+
+font_chinese_path = '/home/wzp/table/chinese/font'
+font_number_path = '/home/wzp/table/numbers/font'
+font_set = []
+for file in os.listdir(font_chinese_path):
+    font_set.append(font_chinese_path + '/' + file)
+
+def get_peek_v(image):
+    begin = -1
+    end = -1
+    ans = []
+    i = -1
+    while i < image.size - 1:
+        i += 1
+        if abs(image[i] - 255.0) < 0.1 and begin == end:
+            continue
+        elif abs(image[i] - 255.0) > 0.1 and begin == end:
+            begin = i
+        elif abs(image[i] - 255.0) < 0.1 and begin > end:
+            end = i
+            temp = list()
+            temp.append(begin - 1)
+            temp.append(end + 1)
+            ans.append(temp)
+            begin = end
+    return ans
+
+def genrate_one_img(charac, width, length, font_set, isnum):
+    ran_font = randint(0, len(font_set) - 1)
+    font_size = randint(14,18)
+    startl = 5 + (18 - font_size) * 10
+    ran_start_left = randint(4, startl)
+    ran_start_right = float(randint(0,50))/100
+    img = Image.new("L", (length, width), "white")
+    draw = ImageDraw.Draw(img) 
+    font = ImageFont.truetype(font_set[ran_font], font_size)
+    draw.text((ran_start_left, ran_start_right), charac, fill = "black", font = font)
+    im2 = np.uint8(np.asarray(img))
+    im3 = im2.copy()
+    thresh = randint(175,195)
+    im3[im3<thresh] = 0
+    im3[im3>=thresh] = 255
+    return np.uint8(im3)
+
+def padding_num(seq):
+    temp = seq
+    while len(temp) < n_len:
+        temp.append(n_class)
+    return temp
+    
+def gen(batch_size = 128):
+    X = np.zeros((batch_size, width, height, 1), dtype=np.uint8)
+    Y = np.zeros((batch_size, n_len), dtype=np.uint16)
+    while True:
+        for i in range(batch_size):
+            num_chr = randint(15,20)
+            word_or_nums = randint(0,15)
+            ran_str = ''.join([random.choice(words) for j in range(num_chr)])
+            isnum = False
+            if word_or_nums == 0:
+                ran_str = ''.join([random.choice(words[:125]) for j in range(num_chr)])
+            X[i] = (genrate_one_img(ran_str, height, width, font_set, isnum).reshape(height, width, 1).transpose(1, 0, 2)) / 255
+            Y[i] = padding_num([words.index(x) for x in ran_str])
+        yield [X, Y, np.ones(batch_size)*int(conv_shape[1]-2), 
+               np.ones(batch_size)*num_chr], np.ones(batch_size)
+
+          
+def evaluate(model, batch_num=10):
+    batch_acc = 0
+    generator = gen(50)
+    for i in range(batch_num):
+        [X_test, y_test, _, _], _  = next(generator)
+        y_pred = base_model.predict(X_test)
+        shape = y_pred[:,2:,:].shape
+        out = K.get_value(K.ctc_decode(y_pred[:,2:,:], input_length=np.ones(shape[0])*shape[1])[0][0])
+        cmp_y = np.asarray(y_test[y_test < n_class])
+        cmp_o = np.asarray(out[out < n_class])
+        if (cmp_y.all() == cmp_o.all()):
+            batch_acc += 1
+    return batch_acc / batch_num
+    
+from keras.callbacks import *
+
+class Evaluate(Callback):
+    def __init__(self):
+        self.accs = []
+    
+    def on_epoch_end(self, epoch, logs=None):
+        acc = evaluate(base_model)*100
+        self.accs.append(acc)
+        print ("acc: ", acc)
+
+evaluator = Evaluate()
+
+checkpointer = ModelCheckpoint(filepath='/home/wzp/table/my_ctc_words.h5', verbose=1, save_best_only=True)
+model.fit_generator(gen(128), steps_per_epoch=512, epochs=100,
+                    callbacks=[EarlyStopping(patience=20), evaluator, checkpointer],
+                    validation_data=gen(64), validation_steps=20)
+                    
+model.save('myctc_model2.h5')
